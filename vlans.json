@@ -1,0 +1,82 @@
+[
+  {
+    "vlan_id": 1,
+    "name": "DEFAULT"
+  },
+  {
+    "vlan_id": 10,
+    "name": "DATA"
+  },
+  {
+    "vlan_id": 20,
+    "name": "VOICE"
+  },
+  {
+    "vlan_id": 30,
+    "name": "MGMT"
+  },
+  {
+    "vlan_id": 40,
+    "name": "GUEST"
+  },
+  {
+    "vlan_id": 50,
+    "name": "SERVERS"
+  },
+  {
+    "vlan_id": 60,
+    "name": "PRINTERS"
+  },
+  {
+    "vlan_id": 70,
+    "name": "SECURITY"
+  },
+  {
+    "vlan_id": 80,
+    "name": "WIRELESS"
+  },
+  {
+    "vlan_id": 90,
+    "name": "STORAGE"
+  },
+  {
+    "vlan_id": 100,
+    "name": "BACKUP"
+  },
+  {
+    "vlan_id": 110,
+    "name": "DMZ"
+  },
+  {
+    "vlan_id": 120,
+    "name": "IOT"
+  },
+  {
+    "vlan_id": 130,
+    "name": "LABS"
+  },
+  {
+    "vlan_id": 140,
+    "name": "CAMERAS"
+  },
+  {
+    "vlan_id": 150,
+    "name": "VOIP_TRUNK"
+  },
+  {
+    "vlan_id": 160,
+    "name": "QUARANTINE"
+  },
+  {
+    "vlan_id": 200,
+    "name": "CORE_TRANSIT"
+  },
+  {
+    "vlan_id": 250,
+    "name": "INTER_DC"
+  },
+  {
+    "vlan_id": 999,
+    "name": "BLACK_HOLE"
+  }
+]

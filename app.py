@@ -131,10 +131,22 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] { color: var(-
 with st.sidebar:
     st.markdown("## 🔌 NetOps")
     st.markdown("<div class='nav-label'>Navigation</div>", unsafe_allow_html=True)
+
+    nav_pages = ["Dashboard", "Switch Browser", "Port Viewer", "VLAN Explorer", "Export"]
+    nav_override = st.session_state.pop("nav_override", None)
+    default_page_idx = nav_pages.index(nav_override) if nav_override in nav_pages else 0
+    if "page_index" not in st.session_state:
+        st.session_state["page_index"] = default_page_idx
+    if nav_override:
+        st.session_state["page_index"] = default_page_idx
+
     page = st.radio(
-        "", ["Dashboard", "Switch Browser", "Port Viewer", "VLAN Explorer", "Export"],
-        label_visibility="collapsed"
+        "", nav_pages,
+        index=st.session_state["page_index"],
+        label_visibility="collapsed",
+        key="page_radio",
     )
+    st.session_state["page_index"] = nav_pages.index(page)
     st.markdown("---")
     st.markdown("<div class='nav-label'>Quick Stats</div>", unsafe_allow_html=True)
     total_sw   = len(sw_df)
@@ -162,48 +174,96 @@ if page == "Dashboard":
         st.metric("Ports Admin-Down", f"{dn:,}")
     with c5: st.metric("VLANs Defined", f"{len(vlan_df)}")
 
-    st.markdown("<div class='section-header'>By Site</div>", unsafe_allow_html=True)
+    # ── Level 1: Location summary ──────────────────────────────────────────────
+    st.markdown("<div class='section-header'>Locations — click a row to drill in</div>", unsafe_allow_html=True)
     site_summary = sw_df.groupby("site").agg(
-        switches=("switch_id", "count"),
-        cisco=("manufacturer", lambda x: (x == "Cisco").sum()),
-        arista=("manufacturer", lambda x: (x == "Arista").sum()),
-        city=("city", "first")
-    ).reset_index().sort_values("switches", ascending=False)
-    st.dataframe(
-        site_summary.rename(columns={"site":"Site","switches":"Switches","cisco":"Cisco","arista":"Arista","city":"City"}),
-        use_container_width=True, hide_index=True
+        Switches=("switch_id", "count"),
+        Cisco=("manufacturer", lambda x: (x == "Cisco").sum()),
+        Arista=("manufacturer", lambda x: (x == "Arista").sum()),
+        City=("city", "first"),
+    ).reset_index().sort_values("Switches", ascending=False).rename(columns={"site": "Site"})
+
+    sel_site = st.dataframe(
+        site_summary,
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
     )
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("<div class='section-header'>By Role</div>", unsafe_allow_html=True)
-        role_df = sw_df["role"].value_counts().reset_index()
-        role_df.columns = ["Role", "Count"]
-        st.dataframe(role_df, use_container_width=True, hide_index=True)
+    # ── Level 2: Switches for selected location ────────────────────────────────
+    chosen_site = None
+    if sel_site and sel_site.selection.rows:
+        chosen_site = site_summary.iloc[sel_site.selection.rows[0]]["Site"]
 
-    with col2:
-        st.markdown("<div class='section-header'>By Manufacturer</div>", unsafe_allow_html=True)
-        mfr_df = sw_df["manufacturer"].value_counts().reset_index()
-        mfr_df.columns = ["Manufacturer", "Count"]
-        st.dataframe(mfr_df, use_container_width=True, hide_index=True)
+    if chosen_site:
+        st.markdown(f"<div class='section-header'>Switches at {chosen_site} — click a row to see ports</div>", unsafe_allow_html=True)
+        site_switches = sw_df[sw_df["site"] == chosen_site][
+            ["hostname", "manufacturer", "model", "management_ip", "role", "building", "closet", "port_count"]
+        ].copy()
+        site_switches.columns = ["Hostname", "Vendor", "Model", "Mgmt IP", "Role", "Building", "Closet", "Ports"]
 
-    with col3:
-        st.markdown("<div class='section-header'>By Chassis Type</div>", unsafe_allow_html=True)
-        chassis_df = sw_df["chassis_type"].value_counts().reset_index()
-        chassis_df.columns = ["Chassis Type", "Count"]
-        st.dataframe(chassis_df, use_container_width=True, hide_index=True)
+        sel_sw = st.dataframe(
+            site_switches,
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+        )
 
-    st.markdown("<div class='section-header'>Data Center Fabric (CHI Spine/Leaf)</div>", unsafe_allow_html=True)
-    dc_df = sw_df[sw_df["fabric"] == "spine-leaf"]
-    if not dc_df.empty:
-        dc_summary = dc_df[["hostname","role","model","management_ip","port_count"]].sort_values(["role","hostname"])
-        dc_summary.columns = ["Hostname","Role","Model","Mgmt IP","Ports"]
-        st.dataframe(dc_summary, use_container_width=True, hide_index=True)
+        # ── Level 3: Ports for selected switch ────────────────────────────────
+        if sel_sw and sel_sw.selection.rows:
+            chosen_hostname = site_switches.iloc[sel_sw.selection.rows[0]]["Hostname"]
+            sw_ports = port_df[port_df["hostname"] == chosen_hostname].copy()
 
-    st.markdown("<div class='section-header'>Port Mode Breakdown</div>", unsafe_allow_html=True)
-    mode_df = port_df["mode"].value_counts().reset_index()
-    mode_df.columns = ["Mode", "Count"]
-    st.dataframe(mode_df, use_container_width=True, hide_index=True)
+            # Merge VLAN name for access ports
+            vlan_map = dict(zip(vlan_df["vlan_id"], vlan_df["name"]))
+
+            def vlan_label(r):
+                if r["mode"] == "access":
+                    vid = r["access_vlan_id"]
+                    name = vlan_map.get(vid, "")
+                    return f"{vid} — {name}" if vid else "—"
+                else:
+                    allowed = r["allowed_vlans"]
+                    if not allowed:
+                        return "—"
+                    parts = [f"{v}" for v in allowed[:4]]
+                    suffix = f" +{len(allowed)-4} more" if len(allowed) > 4 else ""
+                    native = r.get("native_vlan_id", "")
+                    return f"Native:{native} | {', '.join(parts)}{suffix}"
+
+            sw_ports["VLAN"] = sw_ports.apply(vlan_label, axis=1)
+
+            display = sw_ports[["port_name", "admin_status", "oper_status", "mode", "VLAN", "description", "speed", "mac_count"]].copy()
+            display.columns = ["Port", "Admin", "Oper", "Mode", "VLAN", "Description", "Speed", "MACs"]
+
+            st.markdown(f"<div class='section-header'>Ports on {chosen_hostname} — {len(sw_ports)} total</div>", unsafe_allow_html=True)
+            st.dataframe(display, use_container_width=True, hide_index=True)
+
+            col_a, col_b = st.columns([1, 5])
+            with col_a:
+                if st.button("→ Open in Port Viewer", type="primary"):
+                    st.session_state["selected_switch"] = chosen_hostname
+                    st.session_state["nav_override"] = "Port Viewer"
+                    st.rerun()
+    else:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("<div class='section-header'>By Role</div>", unsafe_allow_html=True)
+            role_df = sw_df["role"].value_counts().reset_index()
+            role_df.columns = ["Role", "Count"]
+            st.dataframe(role_df, use_container_width=True, hide_index=True)
+        with col2:
+            st.markdown("<div class='section-header'>By Manufacturer</div>", unsafe_allow_html=True)
+            mfr_df = sw_df["manufacturer"].value_counts().reset_index()
+            mfr_df.columns = ["Manufacturer", "Count"]
+            st.dataframe(mfr_df, use_container_width=True, hide_index=True)
+        with col3:
+            st.markdown("<div class='section-header'>By Chassis Type</div>", unsafe_allow_html=True)
+            chassis_df = sw_df["chassis_type"].value_counts().reset_index()
+            chassis_df.columns = ["Chassis Type", "Count"]
+            st.dataframe(chassis_df, use_container_width=True, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: SWITCH BROWSER
@@ -310,9 +370,7 @@ elif page == "Switch Browser":
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: PORT VIEWER
 # ══════════════════════════════════════════════════════════════════════════════
-elif page == "Port Viewer" or st.session_state.get("nav_override") == "Port Viewer":
-    if st.session_state.get("nav_override") == "Port Viewer":
-        st.session_state["nav_override"] = None
+elif page == "Port Viewer":
 
     st.markdown("# Port Viewer")
 

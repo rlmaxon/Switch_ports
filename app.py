@@ -457,6 +457,8 @@ elif page == "Port Viewer":
     with f5:
         mac_filter = st.selectbox("MAC Count", ["All", "0 (empty)", "1 (single device)", "2+ (multi-device)", "10+ (high density)"])
 
+    desc_search = st.text_input("🔍 Filter by description", placeholder="e.g. uplink, server, printer")
+
     sw_ports = port_df[port_df["hostname"] == selected_hostname].copy()
 
     # Apply description edits
@@ -483,6 +485,9 @@ elif page == "Port Viewer":
         sw_ports = sw_ports[sw_ports["mac_count"] >= 2]
     elif mac_filter == "10+ (high density)":
         sw_ports = sw_ports[sw_ports["mac_count"] >= 10]
+
+    if desc_search:
+        sw_ports = sw_ports[sw_ports["description"].str.contains(desc_search, case=False, na=False)]
 
     st.markdown(f"<div class='section-header'>Ports — {len(sw_ports)} shown</div>", unsafe_allow_html=True)
 
@@ -542,18 +547,33 @@ elif page == "Port Viewer":
 
     # ── Edit description ───────────────────────────────────────────────────────
     st.markdown("<div class='section-header'>Edit Port Description</div>", unsafe_allow_html=True)
+
+    all_ports_for_sw = port_df[port_df["hostname"] == selected_hostname]["port_name"].tolist()
     ec1, ec2, ec3 = st.columns([2, 3, 1])
     with ec1:
-        edit_port = st.selectbox("Port", sw_ports["port_name"].tolist())
+        edit_port = st.selectbox("Port", all_ports_for_sw)
     with ec2:
-        cur_desc = get_description(selected_hostname, edit_port,
-                                   sw_ports[sw_ports["port_name"] == edit_port]["description"].iloc[0] if len(sw_ports) else "")
+        cur_row = port_df[(port_df["hostname"] == selected_hostname) & (port_df["port_name"] == edit_port)]
+        cur_desc = get_description(selected_hostname, edit_port, cur_row["description"].iloc[0] if len(cur_row) else "")
         new_desc = st.text_input("New Description", value=cur_desc)
     with ec3:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("💾 Save"):
-            st.session_state.desc_edits[(selected_hostname, edit_port)] = new_desc
-            st.success("Saved!")
+            if data_source == "static":
+                ports_path = DATA_DIR / "ports.json"
+                with open(ports_path) as f:
+                    all_ports = json.load(f)
+                for p in all_ports:
+                    if p["hostname"] == selected_hostname and p["port_name"] == edit_port:
+                        p["description"] = new_desc
+                        break
+                with open(ports_path, "w") as f:
+                    json.dump(all_ports, f, indent=2)
+                load_data.clear()
+                st.session_state.desc_edits.pop((selected_hostname, edit_port), None)
+                st.success("Saved.")
+            else:
+                st.info("Read-only in API mode.")
             st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════

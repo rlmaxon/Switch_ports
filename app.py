@@ -134,19 +134,14 @@ with st.sidebar:
 
     nav_pages = ["Dashboard", "Switch Browser", "Port Viewer", "VLAN Explorer", "Export"]
     nav_override = st.session_state.pop("nav_override", None)
-    default_page_idx = nav_pages.index(nav_override) if nav_override in nav_pages else 0
-    if "page_index" not in st.session_state:
-        st.session_state["page_index"] = default_page_idx
-    if nav_override:
-        st.session_state["page_index"] = default_page_idx
+    if nav_override and nav_override in nav_pages:
+        st.session_state["page_radio"] = nav_override
 
     page = st.radio(
         "", nav_pages,
-        index=st.session_state["page_index"],
         label_visibility="collapsed",
         key="page_radio",
     )
-    st.session_state["page_index"] = nav_pages.index(page)
     st.markdown("---")
     st.markdown("<div class='nav-label'>Quick Stats</div>", unsafe_allow_html=True)
     total_sw   = len(sw_df)

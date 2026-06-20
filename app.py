@@ -2,6 +2,7 @@ import streamlit as st
 import json
 import pandas as pd
 import io
+import requests
 from pathlib import Path
 
 # ── Page config ────────────────────────────────────────────────────────────────
@@ -12,23 +13,68 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Load data ──────────────────────────────────────────────────────────────────
+# ── Config ─────────────────────────────────────────────────────────────────────
 DATA_DIR = Path(__file__).parent
 
-@st.cache_data
+def load_config():
+    config_path = DATA_DIR / "config.json"
+    if config_path.exists():
+        with open(config_path) as f:
+            return json.load(f)
+    return {}
+
+CONFIG = load_config()
+API_CFG = CONFIG.get("api", {})
+
+def _api_headers():
+    auth = API_CFG.get("auth", {})
+    headers = {}
+    if auth.get("type") == "bearer" and auth.get("token"):
+        headers["Authorization"] = f"Bearer {auth['token']}"
+    elif auth.get("type") == "api_key" and auth.get("api_key"):
+        headers[auth.get("api_key_header", "X-API-Key")] = auth["api_key"]
+    return headers
+
+def _fetch_json(url):
+    resp = requests.get(url, headers=_api_headers(), timeout=API_CFG.get("timeout_seconds", 10))
+    resp.raise_for_status()
+    return resp.json()
+
+def _normalize(data, entity):
+    """Hook for field name mapping when API shape differs from local JSON."""
+    # data is a list of dicts; add remapping here once the real API shape is known
+    return data
+
+# ── Load data ──────────────────────────────────────────────────────────────────
+@st.cache_data(ttl=API_CFG.get("cache_ttl_seconds", 300))
 def load_data():
+    base_url = API_CFG.get("base_url", "").strip()
+    endpoints = API_CFG.get("endpoints", {})
+
+    if base_url:
+        try:
+            switches = _normalize(_fetch_json(base_url + endpoints.get("switches", "/switches")), "switches")
+            ports    = _normalize(_fetch_json(base_url + endpoints.get("ports",    "/ports")),    "ports")
+            vlans    = _normalize(_fetch_json(base_url + endpoints.get("vlans",    "/vlans")),    "vlans")
+            source = "api"
+        except Exception as e:
+            st.warning(f"API unavailable ({e}) — falling back to local data.")
+            switches, ports, vlans, source = _load_static()
+    else:
+        switches, ports, vlans, source = _load_static()
+
+    return pd.DataFrame(switches), pd.DataFrame(ports), pd.DataFrame(vlans), source
+
+def _load_static():
     with open(DATA_DIR / "switches.json") as f:
         switches = json.load(f)
     with open(DATA_DIR / "ports.json") as f:
         ports = json.load(f)
     with open(DATA_DIR / "vlans.json") as f:
         vlans = json.load(f)
-    sw_df   = pd.DataFrame(switches)
-    port_df = pd.DataFrame(ports)
-    vlan_df = pd.DataFrame(vlans)
-    return sw_df, port_df, vlan_df
+    return switches, ports, vlans, "static"
 
-sw_df, port_df, vlan_df = load_data()
+sw_df, port_df, vlan_df, data_source = load_data()
 
 # ── Persistent description edits (session state) ───────────────────────────────
 if "desc_edits" not in st.session_state:
@@ -143,6 +189,10 @@ with st.sidebar:
         key="page_radio",
     )
     st.markdown("---")
+    if data_source == "api":
+        st.markdown("<span style='color:#2ecc71;font-size:0.75rem;'>● Live API</span>", unsafe_allow_html=True)
+    else:
+        st.markdown("<span style='color:#f5a623;font-size:0.75rem;'>● Static files</span>", unsafe_allow_html=True)
     st.markdown("<div class='nav-label'>Quick Stats</div>", unsafe_allow_html=True)
     total_sw   = len(sw_df)
     total_port = len(port_df)

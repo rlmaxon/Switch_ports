@@ -1,0 +1,18 @@
+{
+    "api": {
+        "base_url": "",
+        "endpoints": {
+            "switches": "/switches",
+            "ports": "/ports",
+            "vlans": "/vlans"
+        },
+        "auth": {
+            "type": "",
+        	"token": "",
+            "api_key": "",
+            "api_key_header": "X-API-Key"
+        },
+        "timeout_seconds": 10,
+        "cache_ttl_seconds": 300
+    }
+}

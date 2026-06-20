@@ -4,6 +4,7 @@ import pandas as pd
 import io
 import requests
 from pathlib import Path
+from datetime import datetime, timezone
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -15,6 +16,26 @@ st.set_page_config(
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 DATA_DIR = Path(__file__).parent
+
+LOG_FILE = DATA_DIR / "changes.jsonl"
+
+def write_log(hostname, port_name, old_desc, new_desc, source):
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "hostname": hostname,
+        "port": port_name,
+        "old_description": old_desc,
+        "new_description": new_desc,
+        "source": source,
+    }
+    with open(LOG_FILE, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+def load_log():
+    if not LOG_FILE.exists():
+        return []
+    with open(LOG_FILE) as f:
+        return [json.loads(line) for line in f if line.strip()]
 
 def load_config():
     config_path = DATA_DIR / "config.json"
@@ -178,7 +199,7 @@ with st.sidebar:
     st.markdown("## 🔌 NetOps")
     st.markdown("<div class='nav-label'>Navigation</div>", unsafe_allow_html=True)
 
-    nav_pages = ["Dashboard", "Switch Browser", "Port Viewer", "VLAN Explorer", "Export"]
+    nav_pages = ["Dashboard", "Switch Browser", "Port Viewer", "VLAN Explorer", "Export", "Change Log"]
     nav_override = st.session_state.pop("nav_override", None)
     if nav_override and nav_override in nav_pages:
         st.session_state["page_radio"] = nav_override
@@ -563,12 +584,14 @@ elif page == "Port Viewer":
                 ports_path = DATA_DIR / "ports.json"
                 with open(ports_path) as f:
                     all_ports = json.load(f)
+                old_desc = cur_desc
                 for p in all_ports:
                     if p["hostname"] == selected_hostname and p["port_name"] == edit_port:
                         p["description"] = new_desc
                         break
                 with open(ports_path, "w") as f:
                     json.dump(all_ports, f, indent=2)
+                write_log(selected_hostname, edit_port, old_desc, new_desc, "static")
                 load_data.clear()
                 st.session_state.desc_edits.pop((selected_hostname, edit_port), None)
                 st.success("Saved.")
@@ -722,3 +745,36 @@ elif page == "Export":
                 )
             except ImportError:
                 st.warning("PDF export requires `reportlab`. Run: `pip install reportlab`")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE: CHANGE LOG
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "Change Log":
+    st.markdown("# Change Log")
+    st.markdown("<div class='section-header'>Description Edit History</div>", unsafe_allow_html=True)
+
+    entries = load_log()
+
+    if not entries:
+        st.info("No changes recorded yet.")
+    else:
+        log_df = pd.DataFrame(reversed(entries))  # newest first
+        log_df["timestamp"] = pd.to_datetime(log_df["timestamp"]).dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+        log_df.columns = ["Timestamp", "Switch", "Port", "Old Description", "New Description", "Source"]
+
+        # Search
+        cl1, cl2 = st.columns([3, 1])
+        with cl1:
+            log_search = st.text_input("🔍 Search log", placeholder="switch hostname, port, or description text")
+        with cl2:
+            st.markdown(f"**{len(log_df)}** total changes")
+
+        if log_search:
+            mask = log_df.apply(lambda row: row.astype(str).str.contains(log_search, case=False).any(), axis=1)
+            log_df = log_df[mask]
+            st.caption(f"{len(log_df)} matching entries")
+
+        st.dataframe(log_df, use_container_width=True, hide_index=True)
+
+        csv = log_df.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Download log as CSV", data=csv, file_name="changes.csv", mime="text/csv")

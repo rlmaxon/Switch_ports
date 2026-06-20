@@ -559,7 +559,6 @@ elif page == "Port Viewer":
     with ec3:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("💾 Save"):
-            # Write through to ports.json (static mode only)
             if data_source == "static":
                 ports_path = DATA_DIR / "ports.json"
                 with open(ports_path) as f:
@@ -572,11 +571,9 @@ elif page == "Port Viewer":
                     json.dump(all_ports, f, indent=2)
                 load_data.clear()
                 st.session_state.desc_edits.pop((selected_hostname, edit_port), None)
-                st.success(f"Saved to ports.json")
+                st.success("Saved.")
             else:
-                # API mode: stage in session state only; production should POST to the API
-                st.session_state.desc_edits[(selected_hostname, edit_port)] = new_desc
-                st.warning("API mode: description staged locally. Wire up a POST/PATCH endpoint to persist.")
+                st.info("Read-only in API mode.")
             st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
